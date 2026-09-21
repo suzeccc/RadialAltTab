@@ -1,0 +1,47 @@
+# Python caches and test/tool output
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+
+# Local virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# PyInstaller/build output
+/build/
+/dist/
+*.egg-info/
+*.exe
+*.msi
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# Editor and operating system files
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# Generated QA screenshots (preview.png is the checked-in README image)
+/demo.png
+/demo-windows.png
+/real-windows.png
+/packed-smoke.png
