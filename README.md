@@ -14,12 +14,12 @@
 
 ## 开始使用
 
-### 直接运行打包版
+### 运行发布版
 
-如果仓库中包含打包文件，双击 `dist/RadialAltTab.exe` 即可启动；也可以在 PowerShell 中运行：
+发布版本后，请从项目的发布页下载对应的发布包并解压。双击其中的 `RadialAltTab.exe` 即可启动；也可以在 PowerShell 中运行：
 
 ```powershell
-.\dist\RadialAltTab.exe
+.\RadialAltTab.exe
 ```
 
 启动后请到系统托盘查看 Radial Alt+Tab 图标。右键图标可以退出程序。

@@ -1,0 +1,50 @@
+name: Build and release RadialAltTab
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: .\build.ps1
+
+      - name: Verify artifact
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .\dist\RadialAltTab.exe)) {
+            throw "dist\RadialAltTab.exe was not created"
+          }
+
+      - name: Create GitHub release and upload executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            ".\dist\RadialAltTab.exe" `
+            --repo "${{ github.repository }}" `
+            --title "RadialAltTab ${{ github.ref_name }}" `
+            --generate-notes
