@@ -12,6 +12,7 @@ import threading
 
 from PIL import Image, ImageFilter
 from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QSettings
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation
 from PySide6.QtGui import (
     QColor, QCursor, QFont, QFontMetrics, QGuiApplication, QIcon, QImage,
@@ -130,6 +131,35 @@ WM_QUIT, WH_KEYBOARD_LL = 0x12, 13
 WS_EX_TOOLWINDOW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE = 0x80, 0x40000, 0x08000000
 DWMWA_CLOAKED = 14
 ERROR_ALREADY_EXISTS = 183
+APP_NAME = "RadialAltTab"
+STARTUP_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+THEMES = {
+    "blue": {
+        "label": "深海蓝", "accent": "#5bbaff", "accent_light": "#8dd2ff",
+        "selected_start": "#123658", "selected_end": "#245b8f", "glow": "#416697",
+        "segment_start": "#1b283b", "segment_end": "#202d41",
+        "core_start": "#142740", "core_mid": "#0b1729", "core_end": "#07111f",
+    },
+    "purple": {
+        "label": "暮紫", "accent": "#c39cff", "accent_light": "#e0c8ff",
+        "selected_start": "#39264f", "selected_end": "#704a9c", "glow": "#7653a5",
+        "segment_start": "#2b2438", "segment_end": "#3b304d",
+        "core_start": "#2a2040", "core_mid": "#19132c", "core_end": "#100b1d",
+    },
+    "green": {
+        "label": "薄荷绿", "accent": "#6de0bd", "accent_light": "#a5f2dc",
+        "selected_start": "#16483e", "selected_end": "#277d69", "glow": "#3b9e83",
+        "segment_start": "#203a38", "segment_end": "#2d4d49",
+        "core_start": "#153732", "core_mid": "#0d2724", "core_end": "#071a19",
+    },
+}
+
+
+def themed_color(theme: dict[str, str], key: str, alpha: int = 255) -> QColor:
+    color = QColor(theme[key])
+    color.setAlpha(alpha)
+    return color
 
 
 def activate_window(hwnd: int) -> bool:
@@ -154,6 +184,14 @@ def window_title(hwnd: int) -> str:
     buffer = ctypes.create_unicode_buffer(length + 1)
     user32.GetWindowTextW(hwnd, buffer, length + 1)
     return buffer.value.strip()
+
+
+def short_window_title(title: str) -> str:
+    title = " ".join(title.split())
+    for separator in (" - ", " — ", " · "):
+        if separator in title:
+            return title.split(separator, 1)[0].strip() or title
+    return title
 
 
 def windows(exclude: int = 0) -> list[tuple[int, str]]:
@@ -401,13 +439,14 @@ class KeyboardHook(threading.Thread):
 
 
 class RadialOverlay(QWidget):
-    def __init__(self, demo: bool = False):
+    def __init__(self, demo: bool = False, theme: str = "blue"):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleDescription("按 Tab 选择下一个窗口，按 ·/~ 选择上一个窗口，松开 Alt 切换，按 Esc 取消")
         self.demo = demo
+        self.theme = THEMES.get(theme, THEMES["blue"])
         self.items: list[tuple[int, str]] = []
         self.icons: dict[int, QPixmap] = {}
         self.demo_icons: dict[str, QPixmap] = {}
@@ -419,6 +458,10 @@ class RadialOverlay(QWidget):
         self.open_animation = QPropertyAnimation(self, b"windowOpacity")
         self.open_animation.setDuration(190)
         self.open_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def set_theme(self, theme: str) -> None:
+        self.theme = THEMES.get(theme, THEMES["blue"])
+        self.update()
 
     def open(self, previous: bool = False) -> None:
         if self.isVisible():
@@ -565,7 +608,7 @@ class RadialOverlay(QWidget):
 
     def radii(self) -> tuple[float, float, QPoint]:
         outer = min(350, self.width() * 0.31, self.height() * 0.42)
-        return outer, outer * 0.34, QPoint(self.width() // 2, self.height() // 2)
+        return outer, outer * 0.38, QPoint(self.width() // 2, self.height() // 2)
 
     def sector_at(self, point: QPoint) -> int | None:
         outer, inner, center = self.radii()
@@ -626,8 +669,8 @@ class RadialOverlay(QWidget):
             gradient.setColorAt(1, QColor("#091420"))
             painter.fillRect(self.rect(), gradient)
             glow = QRadialGradient(QPointF(self.width() * .51, self.height() * .42), self.width() * .51)
-            glow.setColorAt(0, QColor(65, 102, 151, 38))
-            glow.setColorAt(1, QColor(65, 102, 151, 0))
+            glow.setColorAt(0, themed_color(self.theme, "glow", 38))
+            glow.setColorAt(1, themed_color(self.theme, "glow", 0))
             painter.fillRect(self.rect(), glow)
         painter.fillRect(self.rect(), QColor(3, 9, 18, 174))
         outer, inner, center = self.radii()
@@ -647,19 +690,19 @@ class RadialOverlay(QWidget):
             path.closeSubpath()
             selected = local == self.selected
             if selected:
-                painter.setPen(QPen(QColor(78, 175, 255, 38), 18))
+                painter.setPen(QPen(themed_color(self.theme, "accent", 38), 18))
                 painter.drawPath(path)
-                painter.setPen(QPen(QColor(91, 187, 255, 86), 8))
+                painter.setPen(QPen(themed_color(self.theme, "accent_light", 86), 8))
                 painter.drawPath(path)
             fill = QRadialGradient(centerf, outer)
             if selected:
-                fill.setColorAt(0, QColor(18, 54, 88, 240))
-                fill.setColorAt(1, QColor(36, 91, 143, 232))
+                fill.setColorAt(0, themed_color(self.theme, "selected_start", 240))
+                fill.setColorAt(1, themed_color(self.theme, "selected_end", 232))
             else:
-                fill.setColorAt(0, QColor(27, 40, 59, 226))
-                fill.setColorAt(1, QColor(32, 45, 65, 211))
+                fill.setColorAt(0, themed_color(self.theme, "segment_start", 226))
+                fill.setColorAt(1, themed_color(self.theme, "segment_end", 211))
             painter.setBrush(fill)
-            painter.setPen(QPen(QColor(141, 210, 255, 235) if selected else QColor(180, 199, 222, 62), 2 if selected else 1))
+            painter.setPen(QPen(themed_color(self.theme, "accent_light", 235) if selected else themed_color(self.theme, "accent", 62), 2 if selected else 1))
             painter.drawPath(path)
 
             thumb_rect = self.thumbnail_rect(local, count, selected)
@@ -680,7 +723,7 @@ class RadialOverlay(QWidget):
             if not selected:
                 painter.fillRect(thumb_rect, QColor(2, 8, 17, 65))
             painter.restore()
-            painter.setPen(QPen(QColor(147, 215, 255, 235) if selected else QColor(206, 229, 246, 119), 1.5 if selected else 1))
+            painter.setPen(QPen(themed_color(self.theme, "accent_light", 235) if selected else themed_color(self.theme, "accent", 119), 1.5 if selected else 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(thumb_rect, 7, 7)
 
@@ -690,53 +733,61 @@ class RadialOverlay(QWidget):
             font.setWeight(QFont.Weight.DemiBold if selected else QFont.Weight.Normal)
             painter.setFont(font)
             metrics = QFontMetrics(font)
-            text = metrics.elidedText(title, Qt.TextElideMode.ElideRight, thumb_rect.width() + 12)
+            text = metrics.elidedText(short_window_title(title), Qt.TextElideMode.ElideRight, thumb_rect.width() + 12)
             icon = self.demo_icons.get(title) if self.demo else self.icons.get(hwnd)
             text_width = metrics.horizontalAdvance(text)
             start_x = label_x - (text_width + (26 if icon else 0)) / 2
             if icon:
                 painter.drawPixmap(QRect(int(start_x), int(label_y - 11), 20, 20), icon)
                 start_x += 26
-            painter.setPen(QColor("#f5f9ff") if selected else QColor("#d7e0eb"))
+            painter.setPen(themed_color(self.theme, "accent_light") if selected else QColor("#d7e0eb"))
             painter.drawText(QPoint(int(start_x), int(label_y + 5)), text)
 
             badge_angle = angle - half * 0.65
             badge_radius = outer - 16
             badge_x = center.x() + badge_radius * math.cos(badge_angle)
             badge_y = center.y() + badge_radius * math.sin(badge_angle)
-            painter.setPen(QPen(QColor(195, 225, 249, 80) if selected else QColor(195, 225, 249, 34), 1))
-            painter.setBrush(QColor(158, 217, 255, 165) if selected else QColor(113, 135, 165, 65))
+            painter.setPen(QPen(themed_color(self.theme, "accent_light", 80) if selected else QColor(195, 225, 249, 34), 1))
+            painter.setBrush(themed_color(self.theme, "accent", 165) if selected else QColor(113, 135, 165, 65))
             painter.drawEllipse(QPointF(badge_x, badge_y), 11, 11)
             painter.setPen(QColor("#10243b") if selected else QColor("#d3dfef"))
             painter.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
             painter.drawText(QRectF(badge_x - 10, badge_y - 10, 20, 20), Qt.AlignmentFlag.AlignCenter, str(local + 1))
 
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor(85, 172, 247, 24), 18))
+        painter.setPen(QPen(themed_color(self.theme, "accent", 24), 18))
         painter.drawEllipse(center, int(inner - 7), int(inner - 7))
         core = QRadialGradient(centerf, inner)
-        core.setColorAt(0, QColor("#142740"))
-        core.setColorAt(0.75, QColor("#0b1729"))
-        core.setColorAt(1, QColor("#07111f"))
+        core.setColorAt(0, QColor(self.theme["core_start"]))
+        core.setColorAt(0.75, QColor(self.theme["core_mid"]))
+        core.setColorAt(1, QColor(self.theme["core_end"]))
         painter.setBrush(core)
-        painter.setPen(QPen(QColor(125, 190, 253, 205), 1.6))
+        painter.setPen(QPen(themed_color(self.theme, "accent_light", 205), 1.6))
         painter.drawEllipse(center, int(inner - 8), int(inner - 8))
         painter.setPen(Qt.PenStyle.NoPen)
+        content_shift = int(inner * 0.12)
         painter.setBrush(QColor("#b6c8e1"))
-        painter.drawRoundedRect(QRect(center.x() - 13, center.y() - 36, 23, 20), 3, 3)
+        painter.drawRoundedRect(QRect(center.x() - 23, center.y() - 43 + content_shift, 34, 29), 4, 4)
         painter.setBrush(QColor("#e1ebfa"))
-        painter.drawRoundedRect(QRect(center.x() - 4, center.y() - 29, 23, 20), 3, 3)
-        title_rect = QRect(center.x() - int(inner - 12), center.y() - int(inner - 8),
-                           int((inner - 12) * 2), int(inner * 0.46))
+        painter.drawRoundedRect(QRect(center.x() - 10, center.y() - 34 + content_shift, 34, 29), 4, 4)
+        alt_title_rect = QRect(center.x() - int(inner), center.y() - int(inner * 0.72) + content_shift, int(inner * 2), 32)
+        painter.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        painter.setPen(QColor(1, 8, 18, 210))
+        painter.drawText(alt_title_rect.translated(0, 2), Qt.AlignmentFlag.AlignCenter, "Alt + Tab")
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(alt_title_rect, Qt.AlignmentFlag.AlignCenter, "Alt + Tab")
+        title_rect = QRect(center.x() - int(inner - 18), center.y() + 7 + content_shift,
+                           int((inner - 18) * 2), int(inner * 0.62))
         title_flags = Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap
-        font = QFont("Microsoft YaHei UI", 10, QFont.Weight.DemiBold)
-        for size in range(10, 6, -1):
+        font = QFont("Microsoft YaHei UI", 11, QFont.Weight.DemiBold)
+        title = short_window_title(self.items[self.selected][1])
+        for size in range(11, 5, -1):
             font.setPointSize(size)
-            if QFontMetrics(font).boundingRect(title_rect, title_flags, self.items[self.selected][1]).height() <= title_rect.height():
+            if QFontMetrics(font).boundingRect(title_rect, title_flags, title).height() <= title_rect.height():
                 break
         painter.setFont(font)
-        painter.setPen(QColor("#a9c7e2"))
-        painter.drawText(title_rect, title_flags, self.items[self.selected][1])
+        painter.setPen(QColor("#f0f7ff"))
+        painter.drawText(title_rect, title_flags, title)
         mouse_footer = "鼠标选择切换"
         keyboard_footer = "     松开 ALT  切换     TAB  下一个     ·/~  上一个     ESC  取消"
         footer_font = QFont("Microsoft YaHei UI", 9)
@@ -773,23 +824,53 @@ class RadialOverlay(QWidget):
                          Qt.AlignmentFlag.AlignCenter, "已最小化" if minimized else "预览不可用")
 
 
-def tray_icon() -> QIcon:
+def tray_icon(theme: str = "blue") -> QIcon:
+    colors = THEMES.get(theme, THEMES["blue"])
     pixmap = QPixmap(64, 64)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor("#142944"))
-    painter.setPen(QPen(QColor("#7bc5ff"), 5))
-    painter.drawEllipse(6, 6, 52, 52)
-    painter.setPen(QColor("#f5f9ff"))
-    painter.setFont(QFont("Segoe UI", 23, QFont.Weight.Bold))
-    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "↹")
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(colors["accent"]))
+    painter.drawRoundedRect(13, 12, 29, 24, 5, 5)
+    painter.setBrush(QColor(colors["accent_light"]))
+    painter.drawRoundedRect(23, 26, 29, 24, 5, 5)
     painter.end()
     return QIcon(pixmap)
 
 
+def autostart_enabled() -> bool:
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY) as key:
+            winreg.QueryValueEx(key, APP_NAME)
+            return True
+    except FileNotFoundError:
+        return False
+
+
+def set_autostart(enabled: bool) -> None:
+    import winreg
+
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY) as key:
+        if enabled:
+            if getattr(sys, "frozen", False):
+                command = f'"{sys.executable}"'
+            else:
+                command = f'"{sys.executable}" "{os.path.abspath(__file__)}"'
+            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, command)
+        else:
+            try:
+                winreg.DeleteValue(key, APP_NAME)
+            except FileNotFoundError:
+                pass
+
+
 def self_test() -> None:
     app = QApplication.instance() or QApplication([])
+    assert short_window_title("README.md - tab - Visual Studio Code") == "README.md"
+    assert short_window_title("Tibo on X: 2026") == "Tibo on X: 2026"
     assert ctypes.sizeof(INPUT) == (40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28)
     assert not activate_window(0)
     name = f"Local\\RadialAltTab.SelfTest.{os.getpid()}"
@@ -804,6 +885,10 @@ def self_test() -> None:
         if first:
             kernel32.CloseHandle(first)
     overlay = RadialOverlay(demo=True)
+    overlay.set_theme("purple")
+    assert overlay.theme["accent"] == THEMES["purple"]["accent"]
+    overlay.set_theme("missing")
+    assert overlay.theme is THEMES["blue"]
     overlay.items = [(0, str(i)) for i in range(11)]
     overlay.resize(1200, 800)
     assert overlay.sector_at(QPoint(600, 100)) == 0
@@ -855,10 +940,16 @@ def main() -> None:
             return
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
+    settings = QSettings(APP_NAME, APP_NAME)
+    theme_name = str(settings.value("theme", "blue"))
+    if theme_name not in THEMES:
+        theme_name = "blue"
+    app_icon = tray_icon(theme_name)
+    app.setWindowIcon(app_icon)
     if args.self_test:
         self_test()
         return
-    overlay = RadialOverlay(demo=args.demo or bool(args.snapshot))
+    overlay = RadialOverlay(demo=args.demo or bool(args.snapshot), theme=theme_name)
     if args.snapshot:
         overlay.open()
         QTimer.singleShot(300, lambda: (overlay.grab().save(args.snapshot), app.quit()))
@@ -875,13 +966,52 @@ def main() -> None:
         if hook.error:
             raise SystemExit(hook.error)
         app.aboutToQuit.connect(hook.stop)
-    tray = QSystemTrayIcon(tray_icon(), app)
+    tray = QSystemTrayIcon(app_icon, app)
     menu = QMenu()
     menu.addAction("显示切换器", overlay.open)
+
+    theme_menu = menu.addMenu("主题颜色")
+    theme_actions = {}
+
+    def apply_theme(name: str) -> None:
+        settings.setValue("theme", name)
+        overlay.set_theme(name)
+        icon = tray_icon(name)
+        tray.setIcon(icon)
+        app.setWindowIcon(icon)
+        for key, action in theme_actions.items():
+            action.setChecked(key == name)
+
+    for key, theme in THEMES.items():
+        action = theme_menu.addAction(theme["label"])
+        action.setCheckable(True)
+        action.triggered.connect(lambda _checked=False, key=key: apply_theme(key))
+        theme_actions[key] = action
+    apply_theme(theme_name)
+
+    startup_action = menu.addAction("开机启动")
+    startup_action.setCheckable(True)
+    startup_action.setChecked(autostart_enabled())
+
+    def toggle_autostart(enabled: bool) -> None:
+        try:
+            set_autostart(enabled)
+        except OSError as error:
+            startup_action.blockSignals(True)
+            startup_action.setChecked(not enabled)
+            startup_action.blockSignals(False)
+            tray.showMessage("Radial Alt+Tab", f"开机启动设置失败：{error}",
+                             QSystemTrayIcon.MessageIcon.Warning, 4000)
+
+    startup_action.toggled.connect(toggle_autostart)
+    menu.addSeparator()
     menu.addAction("退出", app.quit)
     tray.setContextMenu(menu)
     tray.setToolTip("Radial Alt+Tab")
     tray.show()
+    if not args.demo:
+        tray.showMessage("Radial Alt+Tab", "程序已运行，已驻留系统托盘。按 Alt+Tab 呼出切换器。",
+                         QSystemTrayIcon.MessageIcon.Information, 4000)
     try:
         app.exec()
     finally:
