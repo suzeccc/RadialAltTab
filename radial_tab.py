@@ -24,7 +24,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout,
-    QCheckBox, QFrame, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QMenu,
+    QCheckBox, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QMenu,
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
@@ -179,14 +179,20 @@ STARTUP_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_LABELS = {"msedge": "Edge"}
 BLUR_MODES = {
-    "none": "关闭模糊",
     "transparent": "透明背景",
+    "none": "轻微模糊",
     "gaussian": "高斯模糊",
     "acrylic": "亚克力背景",
     "fast": "快速模糊",
     "bilateral": "双边模糊",
 }
 def load_name_mappings(settings: QSettings) -> dict[str, str]:
+    legacy_defaults = {
+        "msedge": "Edge", "code": "VS Code", "chatgpt": "ChatGPT",
+        "v2rayn": "v2rayN", "weixin": "微信", "taskmgr": "任务管理器",
+        "lenovopcmanager": "联想电脑管家", "applicationframehost": "设置",
+        "systemsettings": "设置",
+    }
     raw = settings.value("name_mappings", "")
     try:
         values = json.loads(str(raw)) if raw else {}
@@ -200,8 +206,10 @@ def load_name_mappings(settings: QSettings) -> dict[str, str]:
         if not raw_key.startswith("process:") or not str(value).strip():
             continue
         source = executable_name(raw_key.split(":", 1)[1])
-        if source:
-            mappings[f"process:{source.casefold()}"] = str(value).strip()
+        value = str(value).strip()
+        legacy_value = legacy_defaults.get(source.casefold())
+        if source and (legacy_value is None or legacy_value.casefold() != value.casefold()):
+            mappings[f"process:{source.casefold()}"] = value
     return mappings
 
 
@@ -260,7 +268,7 @@ def load_deleted_name_mappings(settings: QSettings) -> set[str]:
         if not raw_key.startswith("process:"):
             continue
         source = executable_name(raw_key.split(":", 1)[1])
-        if source:
+        if source and source.casefold() in PROCESS_LABELS:
             deleted.add(f"process:{source.casefold()}")
     return deleted
 
@@ -271,7 +279,7 @@ def save_deleted_name_mappings(settings: QSettings, deleted: set[str]) -> None:
         if not key.startswith("process:"):
             continue
         source = executable_name(key.split(":", 1)[1])
-        if source:
+        if source and source.casefold() in PROCESS_LABELS:
             process_deleted.add(f"process:{source.casefold()}")
     settings.setValue("deleted_name_mappings", json.dumps(sorted(process_deleted), ensure_ascii=False))
 
@@ -608,178 +616,6 @@ def edit_name_mapping(parent: QWidget, settings: QSettings, current: dict[str, s
     dialog.activateWindow()
     return dialog
 
-
-def onboarding_position(menu_geometry: QRect, area: QRect, width: int, height: int,
-                        gap: int = 16) -> QPoint:
-    return QPoint(
-        max(area.left(), min(menu_geometry.left() - width - gap, area.right() - width)),
-        max(area.top(), min(menu_geometry.top(), area.bottom() - height)),
-    )
-
-
-class OnboardingGuide(QWidget):
-    STEPS = (
-        (None, "设置就在这里", "右键系统托盘图标，可以打开 Radial Alt+Tab 的设置菜单。"),
-        ("mapping", "名称映射", "修改窗口在切换器里显示的名称，也可以隐藏不需要的窗口。"),
-        ("blur", "背景模糊", "调整切换器的背景效果，让画面更清晰或更柔和。"),
-        ("theme", "主题颜色", "选择你喜欢的环形切换器主题颜色。"),
-        ("startup", "开机启动", "打开后，Windows 启动时会自动运行 Radial Alt+Tab。"),
-    )
-
-    def __init__(self, tray: QSystemTrayIcon, menu: QMenu, settings: QSettings,
-                 actions: dict[str, object]):
-        super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool |
-                         Qt.WindowType.WindowStaysOnTopHint)
-        self.tray = tray
-        self.menu = menu
-        self.settings = settings
-        self.actions = actions
-        self.menu_flags = self.menu.windowFlags()
-        self.step = 0
-        self.guide_position: QPoint | None = None
-        self.highlight = QFrame(self.menu)
-        self.highlight.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.highlight.setStyleSheet(
-            "QFrame { background: transparent; border: 2px solid #ffffff; border-radius: 5px; }"
-        )
-        self.highlight.hide()
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setFixedSize(360, 190)
-        self.setStyleSheet("""
-            QWidget#guide {
-                background: #132037;
-                border: 1px solid #57b4ff;
-                border-radius: 14px;
-            }
-            QLabel { border: none; }
-            QLabel#eyebrow { color: #72caff; font-size: 12px; }
-            QLabel#title { color: #f1f7ff; font-size: 21px; font-weight: 600; }
-            QLabel#body { color: #c9d9ec; font-size: 14px; }
-            QLabel#progress { color: #72caff; font-size: 12px; }
-            QPushButton {
-                color: #ffffff;
-                background: #2d8fe0;
-                border: none;
-                border-radius: 8px;
-                padding: 7px 16px;
-            }
-            QPushButton:hover { background: #45a1ed; }
-            QPushButton#skip {
-                color: #9bb1c9;
-                background: transparent;
-                padding: 7px 8px;
-            }
-            QPushButton#skip:hover { color: #d8e7f6; }
-        """)
-        self.setObjectName("guide")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 18, 22, 16)
-        layout.setSpacing(8)
-        self.eyebrow = QLabel("新手指引")
-        self.eyebrow.setObjectName("eyebrow")
-        self.title = QLabel()
-        self.title.setObjectName("title")
-        self.body = QLabel()
-        self.body.setObjectName("body")
-        self.body.setWordWrap(True)
-        layout.addWidget(self.eyebrow)
-        layout.addWidget(self.title)
-        layout.addWidget(self.body)
-        buttons = QHBoxLayout()
-        buttons.setContentsMargins(0, 6, 0, 0)
-        self.progress = QLabel()
-        self.progress.setObjectName("progress")
-        skip = QPushButton("跳过")
-        skip.setObjectName("skip")
-        skip.clicked.connect(self.finish)
-        self.next_button = QPushButton("下一步")
-        self.next_button.clicked.connect(self.next_step)
-        buttons.addWidget(self.progress)
-        buttons.addStretch()
-        buttons.addWidget(skip)
-        buttons.addWidget(self.next_button)
-        layout.addLayout(buttons)
-
-    def start(self) -> None:
-        self.step = 0
-        self.guide_position = None
-        self.setFixedSize(360, 190)
-        self.render_step()
-
-    def next_step(self) -> None:
-        if self.step == len(self.STEPS) - 1:
-            self.finish()
-            return
-        self.step += 1
-        self.render_step()
-
-    def finish(self) -> None:
-        self.settings.setValue("onboarding_done", True)
-        self.menu.close()
-        self.menu.setWindowFlags(self.menu_flags)
-        self.highlight.hide()
-        self.guide_position = None
-        self.close()
-
-    def render_step(self) -> None:
-        key, title, body = self.STEPS[self.step]
-        self.title.setText(title)
-        self.body.setText(body)
-        self.progress.setText(f"{self.step + 1} / {len(self.STEPS)}")
-        self.next_button.setText("完成" if self.step == len(self.STEPS) - 1 else "下一步")
-        self.adjustSize()
-        self.show()
-        self.raise_()
-        self.show_guide_menu()
-        if key is None:
-            self.highlight.hide()
-            QTimer.singleShot(0, self.place_beside_menu)
-            return
-        QTimer.singleShot(0, lambda key=key: self.highlight_action(key))
-
-    def show_guide_menu(self) -> None:
-        flags = ((self.menu_flags & ~Qt.WindowType.Popup) |
-                 Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
-                 Qt.WindowType.WindowStaysOnTopHint)
-        if self.menu.windowFlags() != flags:
-            self.menu.setWindowFlags(flags)
-        self.menu.adjustSize()
-        self.menu.move(self.menu_position())
-        self.menu.show()
-        self.menu.raise_()
-
-    def highlight_action(self, key: str) -> None:
-        action = self.actions[key]
-        rect = self.menu.actionGeometry(action)
-        if rect.isValid():
-            self.highlight.setGeometry(rect.adjusted(4, 2, -4, -2))
-            self.highlight.raise_()
-            self.highlight.show()
-        self.place_beside_menu()
-
-    def place_beside_menu(self) -> None:
-        if self.menu.isVisible():
-            if self.guide_position is not None:
-                self.move(self.guide_position)
-                return
-            geometry = self.menu.frameGeometry()
-            screen = QGuiApplication.screenAt(geometry.center()) or QGuiApplication.primaryScreen()
-            area = screen.availableGeometry()
-            gap = 16
-            position = onboarding_position(geometry, area, self.width(), self.height(), gap)
-            self.move(position)
-            self.guide_position = QPoint(self.pos())
-
-    def menu_position(self) -> QPoint:
-        size = self.menu.sizeHint()
-        anchor = self.tray.geometry()
-        point = (QPoint(anchor.center().x() - size.width() // 2, anchor.top() - size.height() - 8)
-                 if anchor.isValid() else QCursor.pos() - QPoint(size.width() // 2, size.height() // 2))
-        screen = QGuiApplication.screenAt(anchor.center()) or QGuiApplication.primaryScreen()
-        area = screen.availableGeometry()
-        return QPoint(max(area.left(), min(point.x(), area.right() - size.width())),
-                      max(area.top(), min(point.y(), area.bottom() - size.height())))
 
 THEMES = {
     "blue": {
@@ -2031,8 +1867,6 @@ def self_test() -> None:
     from PySide6.QtTest import QTest
 
     app = QApplication.instance() or QApplication([])
-    assert onboarding_position(QRect(400, 200, 120, 180), QRect(0, 0, 1000, 700), 360, 190) == QPoint(24, 200)
-    assert onboarding_position(QRect(244, 72, 111, 170), QRect(0, 0, 381, 247), 228, 170) == QPoint(0, 72)
     mapping_dialog = NameMappingDialog(None, {})
     mapping_dialog.show()
     app.processEvents()
@@ -2055,6 +1889,7 @@ def self_test() -> None:
         for index in range(mapping_dialog.mapping_list.count())
     }
     assert len(toggle_x) == 1
+    assert mapping_dialog.mapping_list.count() == 2
     row_before_delete = mapping_dialog.mapping_list.currentRow()
     QTest.mouseClick(mapping_dialog.delete_button, Qt.MouseButton.LeftButton)
     assert "process:demo" not in mapping_dialog.mappings
@@ -2071,12 +1906,7 @@ def self_test() -> None:
     assert "process:demo" not in mapping_dialog.disabled
     QTest.mouseClick(mapping_dialog.delete_button, Qt.MouseButton.LeftButton)
     assert "process:demo" not in mapping_dialog.keys()
-    mapping_dialog.refresh("process:msedge")
-    QTest.mouseClick(mapping_dialog.delete_button, Qt.MouseButton.LeftButton)
-    assert "process:msedge" not in mapping_dialog.keys()
-    assert "process:msedge" in mapping_dialog.deleted
     mapping_dialog.disabled.clear()
-    mapping_dialog.deleted.clear()
     mapping_dialog.hide()
     assert short_window_title("README.md - tab - Visual Studio Code") == "README.md"
     assert short_window_title("Tibo on X: 2026") == "Tibo on X: 2026"
@@ -2085,8 +1915,7 @@ def self_test() -> None:
     assert short_window_title("Android Studio") == "Android Studio"
     assert display_window_name("README.md - tab - Visual Studio Code", "code", 1) == "README.md"
     assert display_window_name("Microsoft Edge", "msedge", 1) == "Edge"
-    assert display_window_name("Microsoft Edge", "msedge", 1,
-                               disabled={"process:msedge"}) == "Microsoft Edge"
+    assert display_window_name("Microsoft Edge", "msedge", 1, disabled={"process:msedge"}) == "Microsoft Edge"
     assert display_window_name("ChatGPT", "ChatGPT", 1) == "ChatGPT"
     assert short_window_title("PowerShell 7 (x64)") == "PowerShell 7"
     assert short_window_title("PowerShell 7 (x86)") == "PowerShell 7"
@@ -2336,26 +2165,10 @@ def main() -> None:
 
     startup_action.toggled.connect(toggle_autostart)
     menu.addSeparator()
-    guide_action = menu.addAction("新手指引")
     menu.addAction("退出", app.quit)
     tray.setContextMenu(menu)
     tray.setToolTip("Radial Alt+Tab")
     tray.show()
-    onboarding = OnboardingGuide(
-        tray, menu, settings,
-        {"mapping": mapping_action, "blur": blur_menu.menuAction(),
-         "theme": theme_menu.menuAction(), "startup": startup_action},
-    )
-    guide_action.triggered.connect(onboarding.start)
-    onboarding_done = str(settings.value("onboarding_done", "")).casefold() in {
-        "1", "true", "yes", "on"
-    }
-    onboarding_auto_shown = str(settings.value("onboarding_auto_shown", "")).casefold() in {
-        "1", "true", "yes", "on"
-    }
-    if not args.demo and not onboarding_done and not onboarding_auto_shown:
-        settings.setValue("onboarding_auto_shown", True)
-        QTimer.singleShot(900, onboarding.start)
     if not args.demo:
         tray.showMessage("Radial Alt+Tab", "程序已运行，已驻留系统托盘。按 Alt+Tab 呼出切换器。",
                          QSystemTrayIcon.MessageIcon.NoIcon, 4000)
