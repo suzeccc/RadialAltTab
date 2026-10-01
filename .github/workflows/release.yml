@@ -25,7 +25,23 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pyinstaller
+          python -m pip install -r requirements.txt pyinstaller==6.21.0
+
+      - name: Validate release version
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        shell: pwsh
+        run: |
+          $source = Get-Content .\radial_tab.py -Raw
+          $match = [regex]::Match($source, '(?m)^APP_VERSION = "([^"]+)"$')
+          if (-not $match.Success) { throw "APP_VERSION was not found" }
+          if ($match.Groups[1].Value -ne $env:RELEASE_VERSION) {
+            throw "APP_VERSION ($($match.Groups[1].Value)) must match release tag ($env:RELEASE_VERSION)"
+          }
+
+      - name: Run self-test
+        shell: pwsh
+        run: python radial_tab.py --self-test
 
       - name: Build Windows executable
         shell: pwsh
