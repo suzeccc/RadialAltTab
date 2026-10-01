@@ -203,7 +203,7 @@ DWMWA_CLOAKED = 14
 ERROR_ALREADY_EXISTS = 183
 APP_NAME = "RadialAltTab"
 # ponytail: bump with each release; the release workflow rejects mismatched tags.
-APP_VERSION = "v1.2.0"
+APP_VERSION = "v1.3.0"
 LANGUAGES = ("zh_CN", "zh_TW", "en")
 TRANSLATIONS = {
     "简体中文": ("简体中文", "簡體中文", "Simplified Chinese"),
@@ -2231,7 +2231,7 @@ def self_test() -> None:
     assert tr("显示切换", "en") == "Show switcher"
     assert tr("窗口映射", "en") == "Window mapping"
     assert all(len(values) == len(LANGUAGES) for values in TRANSLATIONS.values())
-    assert version_key(APP_VERSION) == (1, 2, 0)
+    assert version_key(APP_VERSION) == (1, 3, 0)
     assert version_key("v1.10.0") > version_key("v1.9.9")
     app = QApplication.instance() or QApplication([])
     mapping_dialog = NameMappingDialog(None, {})
